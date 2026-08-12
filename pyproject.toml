@@ -1,0 +1,13 @@
+[project]
+name = "claude-session-manager"
+version = "0.1.0"
+description = "Browse and resume Claude Code sessions from any directory."
+requires-python = ">=3.10"
+dependencies = ["PyGObject"]
+
+[project.scripts]
+claude-session-manager = "claude_session_manager.app:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

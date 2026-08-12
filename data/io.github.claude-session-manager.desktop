@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Session Manager
+GenericName=AI coding session manager
+Comment=Browse and resume Claude Code sessions from any directory
+Exec=@APP_DIR@/bin/claude-session-manager
+Icon=io.github.claude-session-manager
+Terminal=false
+Categories=Development;Utility;
+StartupWMClass=io.github.claude-session-manager
+Keywords=claude;ai;terminal;sessions;projects;
