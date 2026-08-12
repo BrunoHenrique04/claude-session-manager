@@ -44,6 +44,10 @@ da lista, em vez de um terminal externo.
 
 - Descobre sessões varrendo `~/.claude/projects/*/*.jsonl` (sem tocar nos
   dados do Claude).
+- Visual em cards: título/caminho no topo, chips coloridos com **modelo
+  usado** (ex. "Sonnet 5") e **% de contexto consumido** (com barrinha e cor
+  que muda de verde → amarelo → vermelho conforme se aproxima do limite da
+  janela de contexto do modelo).
 - Marca sessões **aguardando sua resposta** (última mensagem do Claude foi
   uma pergunta) ou **interrompidas**, com um ícone na linha.
 - **Projetos customizados**: crie um projeto (ex.: "API", "Frontend",

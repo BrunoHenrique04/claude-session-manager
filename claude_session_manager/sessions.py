@@ -2,8 +2,9 @@
 
 Claude Code writes one *.jsonl transcript per session, named by session UUID,
 inside a per-project directory (the project's cwd with path separators
-sanitized). We scan those files for the recorded cwd and a preview of the
-first user message, without touching Claude's own data.
+sanitized). We scan those files for the recorded cwd, a preview of the
+first user message, and the tail for model/context/state info — without
+touching Claude's own data.
 """
 
 from __future__ import annotations
@@ -26,6 +27,55 @@ _UUID_RE = re.compile(
 _MAX_SCAN_LINES = 50
 _MAX_SCAN_BYTES = 256 * 1024
 
+# Context window sizes (tokens) used to turn a raw token count into a
+# percentage. Best-effort match on substrings found in the model id;
+# falls back to the standard 200k window.
+CONTEXT_WINDOWS: list[tuple[str, int]] = [
+    ("[1m]", 1_000_000),
+    ("haiku", 200_000),
+    ("sonnet", 200_000),
+    ("opus", 200_000),
+]
+DEFAULT_CONTEXT_WINDOW = 200_000
+
+
+def context_window_for(model: str | None) -> int:
+    if not model:
+        return DEFAULT_CONTEXT_WINDOW
+    lowered = model.lower()
+    for needle, size in CONTEXT_WINDOWS:
+        if needle in lowered:
+            return size
+    return DEFAULT_CONTEXT_WINDOW
+
+
+def short_model_name(model: str | None) -> str | None:
+    """'claude-haiku-4-5-20251001' -> 'Haiku 4.5', best-effort."""
+    if not model:
+        return None
+    name = model
+    if name.startswith("claude-"):
+        name = name[len("claude-") :]
+    # Drop a trailing date stamp segment like -20260514.
+    parts = name.split("-")
+    if parts and parts[-1].isdigit() and len(parts[-1]) == 8:
+        parts = parts[:-1]
+    if not parts:
+        return model
+    words = [parts[0].capitalize()]
+    numeric_run: list[str] = []
+    for part in parts[1:]:
+        if part.isdigit():
+            numeric_run.append(part)
+            continue
+        if numeric_run:
+            words.append(".".join(numeric_run))
+            numeric_run = []
+        words.append(part.capitalize())
+    if numeric_run:
+        words.append(".".join(numeric_run))
+    return " ".join(words)
+
 
 @dataclass
 class Session:
@@ -36,6 +86,9 @@ class Session:
     mtime: float
     size: int = 0
     state: str = ""  # "" | "waiting" | "interrupted"
+    model: str | None = None  # raw model id from the latest assistant turn
+    context_tokens: int | None = None  # approx. tokens in context after that turn
+    turns: int = 0  # assistant messages seen in the scanned tail (lower bound)
 
     @property
     def project_name(self) -> str:
@@ -46,6 +99,20 @@ class Session:
     @property
     def last_active(self) -> datetime:
         return datetime.fromtimestamp(self.mtime)
+
+    @property
+    def context_window(self) -> int:
+        return context_window_for(self.model)
+
+    @property
+    def context_fraction(self) -> float | None:
+        if self.context_tokens is None:
+            return None
+        return min(1.0, self.context_tokens / self.context_window)
+
+    @property
+    def model_label(self) -> str | None:
+        return short_model_name(self.model)
 
 
 def _extract_text(content) -> str:
@@ -95,12 +162,22 @@ def _scan_transcript(path: Path) -> tuple[str | None, str]:
 _TAIL_BYTES = 64 * 1024
 
 
-def _tail_state(path: Path) -> str:
-    """Cheaply read the transcript's tail to classify its state.
+@dataclass
+class _TailInfo:
+    state: str = ""
+    model: str | None = None
+    context_tokens: int | None = None
+    turns: int = 0
 
-    - "waiting": Claude's last message was a question with no user reply after.
-    - "interrupted": the last event was the user stopping Claude mid-task.
-    - "" otherwise.
+
+def _tail_info(path: Path) -> _TailInfo:
+    """Cheaply read the transcript's tail for state, model and context size.
+
+    - state "waiting": Claude's last message was a question with no reply.
+    - state "interrupted": the last event was the user stopping Claude.
+    - model / context_tokens come from the most recent assistant turn seen
+      in the tail window (usage.input_tokens + cache_read + cache_creation
+      approximates how much context that turn was carrying).
     """
     try:
         size = path.stat().st_size
@@ -109,10 +186,14 @@ def _tail_state(path: Path) -> str:
                 fh.seek(-_TAIL_BYTES, os.SEEK_END)
             blob = fh.read().decode("utf-8", errors="replace")
     except OSError:
-        return ""
+        return _TailInfo()
 
     latest: str | None = None  # "assistant", "user", or "interrupted"
     latest_assistant_text = ""
+    model: str | None = None
+    context_tokens: int | None = None
+    turns = 0
+
     for line in blob.splitlines():
         try:
             entry = json.loads(line)
@@ -120,7 +201,23 @@ def _tail_state(path: Path) -> str:
             continue  # likely a partial first line from the tail window
         if not isinstance(entry, dict):
             continue
-        text = _extract_text((entry.get("message") or {}).get("content")).strip()
+        message = entry.get("message") or {}
+        text = _extract_text(message.get("content")).strip()
+
+        if entry.get("type") == "assistant":
+            turns += 1
+            m = message.get("model")
+            if isinstance(m, str) and not m.startswith("<"):
+                model = m
+            usage = message.get("usage") or {}
+            input_tokens = usage.get("input_tokens") or 0
+            cache_read = usage.get("cache_read_input_tokens") or 0
+            cache_creation = usage.get("cache_creation_input_tokens") or 0
+            output_tokens = usage.get("output_tokens") or 0
+            total = input_tokens + cache_read + cache_creation + output_tokens
+            if total:
+                context_tokens = total
+
         if not text:
             continue
         if "[Request interrupted by user" in text:
@@ -131,11 +228,13 @@ def _tail_state(path: Path) -> str:
         elif entry.get("type") == "user" and not text.startswith("<"):
             latest = "user"
 
+    state = ""
     if latest == "interrupted":
-        return "interrupted"
-    if latest == "assistant" and latest_assistant_text.rstrip().endswith("?"):
-        return "waiting"
-    return ""
+        state = "interrupted"
+    elif latest == "assistant" and latest_assistant_text.rstrip().endswith("?"):
+        state = "waiting"
+
+    return _TailInfo(state=state, model=model, context_tokens=context_tokens, turns=turns)
 
 
 def discover_sessions() -> list[Session]:
@@ -155,6 +254,7 @@ def discover_sessions() -> list[Session]:
             except OSError:
                 continue
             cwd, preview = _scan_transcript(jsonl_path)
+            tail = _tail_info(jsonl_path)
             sessions.append(
                 Session(
                     session_id=jsonl_path.stem,
@@ -163,7 +263,10 @@ def discover_sessions() -> list[Session]:
                     preview=preview,
                     mtime=stat.st_mtime,
                     size=stat.st_size,
-                    state=_tail_state(jsonl_path),
+                    state=tail.state,
+                    model=tail.model,
+                    context_tokens=tail.context_tokens,
+                    turns=tail.turns,
                 )
             )
 

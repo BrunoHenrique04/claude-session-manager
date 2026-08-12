@@ -33,6 +33,52 @@ def _relative_time(mtime: float) -> str:
     return f"{int(delta // 86400)}d atrás"
 
 
+def _chip(text: str, css_class: str | None = None, tooltip: str | None = None) -> Gtk.Widget:
+    label = Gtk.Label(label=text)
+    label.add_css_class("csm-chip")
+    if css_class:
+        label.add_css_class(css_class)
+    if tooltip:
+        label.set_tooltip_text(tooltip)
+    return label
+
+
+def _context_chip(session: Session) -> Gtk.Widget | None:
+    fraction = session.context_fraction
+    if fraction is None:
+        return None
+    pct = round(fraction * 100)
+    if fraction < 0.6:
+        css = "csm-chip-context-ok"
+        bar_class = ""
+    elif fraction < 0.85:
+        css = "csm-chip-context-warn"
+        bar_class = "warn"
+    else:
+        css = "csm-chip-context-danger"
+        bar_class = "danger"
+
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    box.add_css_class("csm-chip")
+    box.add_css_class(css)
+
+    bar = Gtk.ProgressBar()
+    bar.set_fraction(fraction)
+    bar.set_size_request(40, -1)
+    bar.set_valign(Gtk.Align.CENTER)
+    bar.add_css_class("csm-context-bar")
+    if bar_class:
+        bar.add_css_class(bar_class)
+    box.append(bar)
+
+    box.append(Gtk.Label(label=f"{pct}% ctx"))
+    box.set_tooltip_text(
+        f"~{session.context_tokens:,} / {session.context_window:,} tokens de contexto"
+        .replace(",", ".")
+    )
+    return box
+
+
 class ProjectPopover(Gtk.Popover):
     """Lets a row be assigned to (or removed from) a user-defined project."""
 
@@ -117,7 +163,7 @@ class ResumeModePopover(Gtk.Popover):
             btn.add_css_class("flat")
             btn.get_child().set_xalign(0)
             if mode_id == "dangerous":
-                btn.add_css_class("error")
+                btn.add_css_class("csm-danger-item")
 
             def make_handler(args=extra_args):
                 def handler(*_a):
@@ -130,34 +176,52 @@ class ResumeModePopover(Gtk.Popover):
             box.append(btn)
 
 
-class SessionRow(Adw.ActionRow):
+class SessionRow(Gtk.ListBoxRow):
+    """A card: title/subtitle/actions on top, model+context chips below —
+    kept on separate lines so the action buttons never crowd the title into
+    an unreadable sliver."""
+
     def __init__(self, session: Session, window: "MainWindow"):
         super().__init__()
         self.session = session
         self._window = window
         state = window.state
+        self.add_css_class("csm-card")
+        self.set_margin_top(3)
+        self.set_margin_bottom(3)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        outer.set_margin_top(4)
+        outer.set_margin_bottom(4)
+        self.set_child(outer)
+
+        content = Adw.ActionRow()
+        content.add_css_class("csm-card-content")
+        # Adw.ActionRow wraps title/subtitle onto unlimited lines by default
+        # instead of ellipsizing; force single-line + ellipsis.
+        content.set_title_lines(1)
+        content.set_subtitle_lines(1)
+        outer.append(content)
 
         title = state.custom_name(session.session_id) or (
             session.preview or f"Sessão {session.session_id[:8]}"
         )
-        self.set_title(GLib.markup_escape_text(title))
-        subtitle = session.cwd or str(session.jsonl_path.parent)
+        content.set_title(GLib.markup_escape_text(title))
+
+        subtitle_path = session.cwd or str(session.jsonl_path.parent)
         project_name = state.project_name(state.project_of(session.session_id) or "")
-        tag = f" · 🏷 {project_name}" if project_name else ""
-        self.set_subtitle(
-            f"{GLib.markup_escape_text(subtitle)} · {_relative_time(session.mtime)} · "
+        tag = f"  ·  🏷 {project_name}" if project_name else ""
+        content.set_subtitle(
+            f"{GLib.markup_escape_text(subtitle_path)}  ·  {_relative_time(session.mtime)}  ·  "
             f"{session.session_id[:8]}{GLib.markup_escape_text(tag)}"
         )
-        self.set_activatable(True)
-        self.connect("activated", lambda *_: window.resume(self.session))
 
         if session.state in _STATE_ICON:
             icon_name, tooltip = _STATE_ICON[session.state]
             state_icon = Gtk.Image.new_from_icon_name(icon_name)
             state_icon.set_tooltip_text(tooltip)
-            if session.state == "waiting":
-                state_icon.add_css_class("accent")
-            self.add_prefix(state_icon)
+            state_icon.add_css_class("accent" if session.state == "waiting" else "warning")
+            content.add_prefix(state_icon)
 
         self.fav_button = Gtk.ToggleButton()
         self.fav_button.set_icon_name("starred-symbolic")
@@ -166,7 +230,7 @@ class SessionRow(Adw.ActionRow):
         self.fav_button.set_active(state.is_favorite(session.session_id))
         self.fav_button.set_tooltip_text("Favorito")
         self.fav_button.connect("toggled", self._toggled_fav)
-        self.add_prefix(self.fav_button)
+        content.add_prefix(self.fav_button)
 
         project_btn = Gtk.MenuButton()
         project_btn.set_icon_name("tag-symbolic")
@@ -174,7 +238,7 @@ class SessionRow(Adw.ActionRow):
         project_btn.add_css_class("flat")
         project_btn.set_tooltip_text("Atribuir a um projeto")
         project_btn.set_popover(ProjectPopover(window, session))
-        self.add_suffix(project_btn)
+        content.add_suffix(project_btn)
 
         rename_button = Gtk.Button()
         rename_button.set_icon_name("document-edit-symbolic")
@@ -182,16 +246,30 @@ class SessionRow(Adw.ActionRow):
         rename_button.add_css_class("flat")
         rename_button.set_tooltip_text("Renomear sessão")
         rename_button.connect("clicked", lambda *_: window.prompt_rename(session))
-        self.add_suffix(rename_button)
+        content.add_suffix(rename_button)
 
         resume_split = Adw.SplitButton()
         resume_split.set_icon_name("media-playback-start-symbolic")
         resume_split.set_valign(Gtk.Align.CENTER)
         resume_split.add_css_class("flat")
+        resume_split.add_css_class("circular")
         resume_split.set_tooltip_text("Retomar")
         resume_split.connect("clicked", lambda *_: window.resume(session))
         resume_split.set_popover(ResumeModePopover(window, session))
-        self.add_suffix(resume_split)
+        content.add_suffix(resume_split)
+
+        # -- chips: model, context usage, on their own line -------------------
+        chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        chips.set_margin_start(16)
+        chips.set_margin_end(12)
+        chips.set_margin_bottom(2)
+        if session.model_label:
+            chips.append(_chip(session.model_label, "csm-chip-model", tooltip=session.model))
+        ctx_chip = _context_chip(session)
+        if ctx_chip is not None:
+            chips.append(ctx_chip)
+        if chips.get_first_child() is not None:
+            outer.append(chips)
 
     def _toggled_fav(self, button: Gtk.ToggleButton) -> None:
         self._window.state.set_favorite(self.session.session_id, button.get_active())
@@ -200,22 +278,23 @@ class SessionRow(Adw.ActionRow):
     def search_text(self) -> str:
         s = self.session
         return " ".join(
-            filter(None, [s.preview, s.project_name, s.cwd, s.session_id])
+            filter(None, [s.preview, s.project_name, s.cwd, s.session_id, s.model])
         ).lower()
 
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app, title="Claude Sessions")
-        self.set_default_size(1180, 720)
+        self.set_default_size(1180, 760)
+        self.add_css_class("csm-window")
 
         self.state = State()
         self.sessions: list[Session] = []
         self._open_pages: dict[str, Adw.TabPage] = {}
 
         split_view = Adw.NavigationSplitView()
-        split_view.set_min_sidebar_width(340)
-        split_view.set_max_sidebar_width(460)
+        split_view.set_min_sidebar_width(380)
+        split_view.set_max_sidebar_width(520)
         self.set_content(split_view)
 
         # -- sidebar: session list ------------------------------------------------
@@ -228,16 +307,19 @@ class MainWindow(Adw.ApplicationWindow):
 
         refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh_btn.set_tooltip_text("Atualizar")
+        refresh_btn.add_css_class("flat")
         refresh_btn.connect("clicked", lambda *_: self.refresh())
         header.pack_end(refresh_btn)
 
         new_project_btn = Gtk.Button(icon_name="folder-new-symbolic")
         new_project_btn.set_tooltip_text("Novo projeto")
+        new_project_btn.add_css_class("flat")
         new_project_btn.connect("clicked", lambda *_: self._prompt_new_project())
         header.pack_end(new_project_btn)
 
         self.search_entry = Gtk.SearchEntry()
-        self.search_entry.set_placeholder_text("Buscar sessões, projetos, ids…")
+        self.search_entry.add_css_class("csm-searchbar")
+        self.search_entry.set_placeholder_text("Buscar sessões, projetos, modelos, ids…")
         self.search_entry.connect("search-changed", lambda *_: self._apply_filter())
         header.set_title_widget(self.search_entry)
 
@@ -249,7 +331,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay.set_child(scrolled)
 
         clamp = Adw.Clamp()
-        clamp.set_maximum_size(900)
+        clamp.set_maximum_size(920)
         scrolled.set_child(clamp)
 
         self.status_page = Adw.StatusPage()
@@ -259,11 +341,11 @@ class MainWindow(Adw.ApplicationWindow):
             "Nenhuma sessão do Claude Code em ~/.claude/projects ainda."
         )
 
-        self.groups_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        self.groups_box.set_margin_top(16)
-        self.groups_box.set_margin_bottom(16)
-        self.groups_box.set_margin_start(12)
-        self.groups_box.set_margin_end(12)
+        self.groups_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+        self.groups_box.set_margin_top(18)
+        self.groups_box.set_margin_bottom(22)
+        self.groups_box.set_margin_start(14)
+        self.groups_box.set_margin_end(14)
         clamp.set_child(self.groups_box)
 
         # -- content: embedded terminal tabs (or a fallback notice) ---------------
@@ -356,14 +438,14 @@ class MainWindow(Adw.ApplicationWindow):
         assigned_ids: set[str] = set()
 
         if favorites:
-            self._append_group("★ Favoritos", favorites)
+            self._append_group("★  Favoritos", favorites)
 
         for pid, name in projects:
             members = [
                 s for s in self.sessions if self.state.project_of(s.session_id) == pid
             ]
             assigned_ids.update(s.session_id for s in members)
-            self._append_group(f"🏷 {name}", members, empty_hint=not members)
+            self._append_group(f"🏷  {name}", members, empty_hint=not members)
 
         remaining = [s for s in self.sessions if s.session_id not in assigned_ids]
         by_folder: dict[str, list[Session]] = {}
@@ -372,21 +454,29 @@ class MainWindow(Adw.ApplicationWindow):
 
         if projects and remaining:
             label = Gtk.Label(label="Por pasta", xalign=0)
-            label.add_css_class("title-4")
+            label.add_css_class("csm-group-hint")
+            label.add_css_class("dim-label")
             self.groups_box.append(label)
 
         for folder in sorted(by_folder, key=lambda p: by_folder[p][0].mtime, reverse=True):
-            self._append_group(folder, by_folder[folder])
+            self._append_group(f"📁  {folder}", by_folder[folder])
 
         self._apply_filter()
 
     def _append_group(
         self, label: str, sessions: list[Session], empty_hint: bool = False
     ) -> None:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
 
-        header = Gtk.Label(label=label, xalign=0)
-        header.add_css_class("heading")
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("csm-group-header")
+        title_label = Gtk.Label(label=label, xalign=0)
+        title_label.add_css_class("csm-group-title")
+        header.append(title_label)
+        if sessions:
+            count = Gtk.Label(label=str(len(sessions)))
+            count.add_css_class("csm-group-count")
+            header.append(count)
         box.append(header)
 
         if empty_hint:
@@ -402,8 +492,11 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         listbox = Gtk.ListBox()
-        listbox.add_css_class("boxed-list")
+        listbox.add_css_class("csm-list")
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        listbox.connect(
+            "row-activated", lambda _lb, row: self.resume(row.session)
+        )
         box.append(listbox)
 
         for session in sessions:
