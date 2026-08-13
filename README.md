@@ -5,7 +5,26 @@ salvas em `~/.claude/projects/`, de qualquer diretório do sistema.
 
 Inspirado em [r4nd3l/agent-session-manager](https://github.com/r4nd3l/agent-session-manager).
 
-## Rodar
+## Instalar (rápido)
+
+```bash
+./install.sh
+```
+
+Sem sudo, tudo em paths do usuário. Isso:
+
+- checa as dependências (GTK4 + libadwaita; avisa sobre VTE se faltar,
+  com o comando certo pro seu sistema — inclusive `rpm-ostree` em
+  distros imutáveis como Bazzite/Silverblue/Kinoite, em vez de sugerir
+  `dnf` num lugar onde isso não funciona);
+- cria o comando `claude-session-manager` em `~/.local/bin` (symlink pra
+  este diretório — `git pull` atualiza sem precisar reinstalar);
+- instala o `.desktop` + ícone no menu de aplicativos.
+
+Pra desinstalar: `./install.sh --uninstall` (mantém favoritos/projetos em
+`~/.config/claude-session-manager`, a menos que você apague a pasta também).
+
+## Rodar sem instalar
 
 ```bash
 python3 -m claude_session_manager
@@ -14,28 +33,14 @@ python3 -m claude_session_manager
 Dependência: PyGObject com GTK4 + libadwaita (`python3-gobject`, `gtk4`,
 `libadwaita` — já presentes neste sistema).
 
-### Instalar no menu de aplicativos
-
-```bash
-bash data/install.sh
-```
-
-Instala um `.desktop` + ícone em `~/.local/share/applications` e
-`~/.local/share/icons` (sem sudo). Depois disso o app aparece no launcher
-como "Claude Session Manager".
-
 ### Terminal embutido (opcional)
 
 Por padrão, "Retomar" abre um terminal externo (konsole, gnome-terminal,
 kitty, alacritty, wezterm, foot ou xterm — o primeiro encontrado no PATH)
 já com `claude --resume <id>` rodando no diretório do projeto.
 
-Se você instalar os bindings GTK4 do VTE:
-
-```bash
-sudo dnf install vte291-gtk4
-```
-
+Se você instalar os bindings GTK4 do VTE (`./install.sh` já te diz o
+comando certo pro seu sistema — `dnf`, `rpm-ostree`, `apt` ou `pacman`),
 o app detecta automaticamente na próxima abertura e passa a abrir cada
 sessão numa aba de terminal embutida (`Adw.TabView`), num painel ao lado
 da lista, em vez de um terminal externo.

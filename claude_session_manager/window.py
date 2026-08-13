@@ -10,6 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from . import terminal
+from .depcheck import vte_install_hint
 from .sessions import Session, discover_sessions
 from .state import State
 from .vte_terminal import VTE_AVAILABLE, build_terminal_page
@@ -368,7 +369,7 @@ class MainWindow(Adw.ApplicationWindow):
             placeholder.set_title("Terminal embutido indisponível")
             placeholder.set_description(
                 "Instale os bindings GTK4 do VTE para abrir sessões aqui dentro:\n"
-                "sudo dnf install vte291-gtk4\n\n"
+                f"{vte_install_hint()}\n\n"
                 "Por enquanto, retomar abre um terminal externo "
                 f"({terminal.find_terminal() or 'nenhum encontrado'})."
             )
