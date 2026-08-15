@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import time
 
 import gi
@@ -7,13 +9,13 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from . import terminal
 from .depcheck import vte_install_hint
 from .sessions import Session, discover_sessions
 from .state import State
-from .vte_terminal import VTE_AVAILABLE, build_terminal_page
+from .vte_terminal import VTE_AVAILABLE, build_terminal_widget
 
 REFRESH_INTERVAL_MS = 5000
 
@@ -148,7 +150,8 @@ class ProjectPopover(Gtk.Popover):
 
 
 class ResumeModePopover(Gtk.Popover):
-    """Extra ways to launch `claude --resume`, e.g. dangerous mode."""
+    """Extra ways to launch `claude --resume`: default vs. dangerous mode,
+    each either embedded (VTE, when available) or in an external terminal."""
 
     def __init__(self, window: "MainWindow", session: Session):
         super().__init__()
@@ -159,22 +162,91 @@ class ResumeModePopover(Gtk.Popover):
         box.set_margin_end(6)
         self.set_child(box)
 
-        for mode_id, label, extra_args in terminal.RESUME_MODES:
+        vte_here = VTE_AVAILABLE and window.tab_view is not None
+        modes = terminal.RESUME_MODES
+        for i, (mode_id, label, extra_args) in enumerate(modes):
+            danger = mode_id == "dangerous"
+            if vte_here:
+                self._add(box, window, session, f"{label} · Aqui no app", extra_args, "vte", danger)
+            self._add(
+                box, window, session, f"{label} · Terminal externo", extra_args, "external", danger
+            )
+            if i < len(modes) - 1:
+                box.append(Gtk.Separator())
+
+    def _add(
+        self,
+        box: Gtk.Box,
+        window: "MainWindow",
+        session: Session,
+        label: str,
+        extra_args: list[str],
+        target: str,
+        danger: bool,
+    ) -> None:
+        btn = Gtk.Button(label=label)
+        btn.add_css_class("flat")
+        btn.get_child().set_xalign(0)
+        if danger:
+            btn.add_css_class("csm-danger-item")
+
+        def handler(*_a, args=extra_args, target=target):
+            self.popdown()
+            window.resume(session, extra_args=args, target=target)
+
+        btn.connect("clicked", handler)
+        box.append(btn)
+
+
+class SessionContextPopover(Gtk.Popover):
+    """Right-click menu: actions that don't fit as row icon buttons."""
+
+    def __init__(self, window: "MainWindow", session: Session):
+        super().__init__()
+        self.set_has_arrow(False)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        self.set_child(box)
+
+        def add(label: str, handler, danger: bool = False) -> None:
             btn = Gtk.Button(label=label)
             btn.add_css_class("flat")
             btn.get_child().set_xalign(0)
-            if mode_id == "dangerous":
+            if danger:
                 btn.add_css_class("csm-danger-item")
 
-            def make_handler(args=extra_args):
-                def handler(*_a):
-                    self.popdown()
-                    window.resume(session, extra_args=args)
+            def _h(*_a, handler=handler):
+                self.popdown()
+                handler()
 
-                return handler
-
-            btn.connect("clicked", make_handler())
+            btn.connect("clicked", _h)
             box.append(btn)
+
+        add("▶  Retomar", lambda: window.resume(session))
+        add(
+            "⚠  Retomar (modo perigoso)",
+            lambda: window.resume(session, extra_args=["--dangerously-skip-permissions"]),
+        )
+        box.append(Gtk.Separator())
+        add("📂  Abrir local da sessão", lambda: window.open_session_location(session))
+        add("🆔  Copiar ID da sessão", lambda: window.copy_to_clipboard(session.session_id))
+        add(
+            "📋  Copiar caminho",
+            lambda: window.copy_to_clipboard(session.cwd or str(session.jsonl_path.parent)),
+        )
+        box.append(Gtk.Separator())
+        fav_label = (
+            "☆  Remover dos favoritos"
+            if window.state.is_favorite(session.session_id)
+            else "⭐  Favoritar"
+        )
+        add(fav_label, lambda: window.toggle_favorite(session))
+        add("✏️  Renomear", lambda: window.prompt_rename(session))
+        box.append(Gtk.Separator())
+        add("🗑  Excluir sessão…", lambda: window.prompt_delete_session(session), danger=True)
 
 
 class SessionRow(Gtk.ListBoxRow):
@@ -190,6 +262,10 @@ class SessionRow(Gtk.ListBoxRow):
         self.add_css_class("csm-card")
         self.set_margin_top(3)
         self.set_margin_bottom(3)
+
+        right_click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        right_click.connect("pressed", self._on_right_click)
+        self.add_controller(right_click)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         outer.set_margin_top(4)
@@ -274,6 +350,15 @@ class SessionRow(Gtk.ListBoxRow):
 
     def _toggled_fav(self, button: Gtk.ToggleButton) -> None:
         self._window.state.set_favorite(self.session.session_id, button.get_active())
+
+    def _on_right_click(self, _gesture, _n_press, x: float, y: float) -> None:
+        popover = SessionContextPopover(self._window, self.session)
+        popover.set_parent(self)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: p.unparent())
+        popover.popup()
 
     @property
     def search_text(self) -> str:
@@ -527,11 +612,18 @@ class MainWindow(Adw.ApplicationWindow):
             group_box.set_visible(any_visible)
             group_box = group_box.get_next_sibling()
 
-    def resume(self, session: Session, extra_args: list[str] | None = None) -> None:
+    def resume(
+        self,
+        session: Session,
+        extra_args: list[str] | None = None,
+        target: str | None = None,
+    ) -> None:
+        """target: None (auto: embedded when available, else external),
+        "vte" (embedded), or "external" (always spawn a terminal emulator)."""
         extra_args = extra_args or []
         tab_key = f"{session.session_id}:{','.join(extra_args)}"
 
-        if VTE_AVAILABLE and self.tab_view is not None:
+        if target != "external" and VTE_AVAILABLE and self.tab_view is not None:
             existing = self._open_pages.get(tab_key)
             if existing is not None and existing.get_parent() is not None:
                 self.tab_view.set_selected_page(existing)
@@ -539,8 +631,10 @@ class MainWindow(Adw.ApplicationWindow):
             title = self.state.custom_name(session.session_id) or session.project_name
             if extra_args:
                 title += " ⚠"
-            page = build_terminal_page(session.session_id, session.cwd, title, extra_args)
-            self.tab_view.append(page)
+            widget = build_terminal_widget(session.session_id, session.cwd, extra_args)
+            page = self.tab_view.append(widget)
+            page.set_title(title)
+            page.set_tooltip(f"{title} · {session.session_id[:8]}")
             self.tab_view.set_selected_page(page)
             self._open_pages[tab_key] = page
             return
@@ -549,6 +643,68 @@ class MainWindow(Adw.ApplicationWindow):
         toast = Adw.Toast(title=message if ok else f"⚠ {message}")
         toast.set_timeout(4)
         self.toast_overlay.add_toast(toast)
+
+    def _toast(self, text: str) -> None:
+        toast = Adw.Toast(title=text)
+        toast.set_timeout(3)
+        self.toast_overlay.add_toast(toast)
+
+    def toggle_favorite(self, session: Session) -> None:
+        self.state.set_favorite(session.session_id, not self.state.is_favorite(session.session_id))
+        self._rebuild()
+
+    def copy_to_clipboard(self, text: str) -> None:
+        self.get_clipboard().set(text)
+        self._toast("Copiado.")
+
+    def open_session_location(self, session: Session) -> None:
+        path = session.cwd or str(session.jsonl_path.parent)
+        for binary, build_argv in (
+            ("xdg-open", lambda p: ["xdg-open", p]),
+            ("dolphin", lambda p: ["dolphin", p]),
+            ("nautilus", lambda p: ["nautilus", p]),
+            ("thunar", lambda p: ["thunar", p]),
+            ("nemo", lambda p: ["nemo", p]),
+            ("pcmanfm", lambda p: ["pcmanfm", p]),
+        ):
+            if shutil.which(binary):
+                try:
+                    subprocess.Popen(build_argv(path), start_new_session=True)
+                    return
+                except OSError:
+                    continue
+        self._toast("⚠ Nenhum gerenciador de arquivos encontrado.")
+
+    def prompt_delete_session(self, session: Session) -> None:
+        title = self.state.custom_name(session.session_id) or session.preview or session.session_id[:8]
+        dialog = Adw.AlertDialog(
+            heading="Excluir sessão?",
+            body=(
+                f'"{title}" será apagada permanentemente do disco '
+                f"({session.jsonl_path.name}). Isso não pode ser desfeito."
+            ),
+        )
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("delete", "Excluir")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+
+        def on_response(_dlg, response):
+            if response == "delete":
+                self._delete_session(session)
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
+
+    def _delete_session(self, session: Session) -> None:
+        try:
+            session.jsonl_path.unlink()
+        except OSError as exc:
+            self._toast(f"⚠ Não foi possível excluir: {exc}")
+            return
+        self.state.forget_session(session.session_id)
+        self._toast("Sessão excluída.")
+        self.refresh()
 
     def prompt_rename(self, session: Session) -> None:
         current = self.state.custom_name(session.session_id) or session.preview or ""

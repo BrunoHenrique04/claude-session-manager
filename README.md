@@ -65,7 +65,14 @@ da lista, em vez de um terminal externo.
 - Busca ao vivo por nome, projeto, preview da primeira mensagem ou id da
   sessão.
 - Clique/Enter numa sessão (ou botão ▶) retoma a sessão — embutida (VTE)
-  ou em terminal externo, dependendo do que está disponível.
+  ou em terminal externo, dependendo do que está disponível. A seta ao
+  lado do ▶ deixa escolher explicitamente: padrão ou modo perigoso
+  (`--dangerously-skip-permissions`), cada um aqui no app ou em terminal
+  externo.
+- **Botão direito numa sessão** abre um menu com mais ações: abrir a
+  pasta da sessão no gerenciador de arquivos, copiar id/caminho,
+  favoritar, renomear e **excluir a sessão** (apaga o `.jsonl` do disco,
+  com confirmação — não tem como desfazer).
 - Atualização automática a cada 5s.
 
 ## Variáveis de ambiente (dev/teste)

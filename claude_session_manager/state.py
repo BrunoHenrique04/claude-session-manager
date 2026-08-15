@@ -119,3 +119,8 @@ class State:
         else:
             self._data["sessions"].get(session_id, {}).pop("project", None)
         self.save()
+
+    def forget_session(self, session_id: str) -> None:
+        """Drop favorite/name/project bookkeeping for a deleted session."""
+        if self._data["sessions"].pop(session_id, None) is not None:
+            self.save()
