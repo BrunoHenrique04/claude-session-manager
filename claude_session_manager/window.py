@@ -314,7 +314,9 @@ class SessionRow(Gtk.ListBoxRow):
         project_btn.set_valign(Gtk.Align.CENTER)
         project_btn.add_css_class("flat")
         project_btn.set_tooltip_text("Atribuir a um projeto")
-        project_btn.set_popover(ProjectPopover(window, session))
+        project_popover = ProjectPopover(window, session)
+        window.track_popover(project_popover)
+        project_btn.set_popover(project_popover)
         content.add_suffix(project_btn)
 
         rename_button = Gtk.Button()
@@ -332,7 +334,9 @@ class SessionRow(Gtk.ListBoxRow):
         resume_split.add_css_class("circular")
         resume_split.set_tooltip_text("Retomar")
         resume_split.connect("clicked", lambda *_: window.resume(session))
-        resume_split.set_popover(ResumeModePopover(window, session))
+        resume_popover = ResumeModePopover(window, session)
+        window.track_popover(resume_popover)
+        resume_split.set_popover(resume_popover)
         content.add_suffix(resume_split)
 
         # -- chips: model, context usage, on their own line -------------------
@@ -351,8 +355,14 @@ class SessionRow(Gtk.ListBoxRow):
     def _toggled_fav(self, button: Gtk.ToggleButton) -> None:
         self._window.state.set_favorite(self.session.session_id, button.get_active())
 
-    def _on_right_click(self, _gesture, _n_press, x: float, y: float) -> None:
+    def _on_right_click(self, gesture, _n_press, x: float, y: float) -> None:
+        # Claim the sequence: popping a popover up from a "pressed" handler
+        # without this can make GTK treat the matching button-release (which
+        # lands outside the popover, since it's only just appeared) as a
+        # click-away and immediately dismiss it again.
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         popover = SessionContextPopover(self._window, self.session)
+        self._window.track_popover(popover)
         popover.set_parent(self)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
@@ -377,6 +387,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.state = State()
         self.sessions: list[Session] = []
         self._open_pages: dict[str, Adw.TabPage] = {}
+        # Bumped while any row popover (project/resume-mode/right-click menu)
+        # is open, so the periodic refresh below can skip rebuilding the
+        # sidebar — _rebuild() throws away and recreates every row widget,
+        # which yanks an open popover out from under the user mid-click.
+        self._popups_open = 0
 
         split_view = Adw.NavigationSplitView()
         split_view.set_min_sidebar_width(380)
@@ -478,8 +493,18 @@ class MainWindow(Adw.ApplicationWindow):
         return True
 
     def _on_timeout(self) -> bool:
-        self.refresh()
+        if self._popups_open <= 0:
+            self.refresh()
         return True
+
+    def track_popover(self, popover: Gtk.Popover) -> None:
+        """Keep the periodic refresh from rebuilding the sidebar (and
+        yanking away this popover) while it's open."""
+
+        def _on_visible(p: Gtk.Popover, _pspec) -> None:
+            self._popups_open += 1 if p.get_visible() else -1
+
+        popover.connect("notify::visible", _on_visible)
 
     def refresh(self) -> None:
         self.sessions = discover_sessions()
