@@ -15,21 +15,24 @@ Linux. `install.sh` é testado/simulado nas famílias principais:
 |-------------------------------------------|-------------------------------|---------|
 | Fedora / RHEL / CentOS                    | `dnf`                         | ✅ instalação real (Bazzite, base Fedora) |
 | Bazzite / Silverblue / Kinoite (atômicos) | `rpm-ostree` (+ reboot)       | ✅ instalação real |
-| Debian / Ubuntu                           | `apt`                         | ⚙️ simulado (detecção de distro só) |
+| Ubuntu 24.04                              | `apt`                         | ✅ instalação real (container limpo, usuário sem privilégios) |
+| Debian 12                                 | `apt`                         | ✅ instalação real (container limpo, usuário sem privilégios) |
 | Arch / Manjaro / EndeavourOS              | `pacman`                      | ⚙️ simulado |
 | openSUSE (Leap/Tumbleweed)                | `zypper`                      | ⚙️ simulado |
 | openSUSE MicroOS/Aeon/Kalpa (atômicos)    | `transactional-update` (+ reboot) | ⚙️ simulado |
 | Alpine, Void, NixOS                       | `apk` / `xbps` / `nix`        | ⚙️ simulado |
 
-"Simulado" = a lógica de detecção de distro (`depcheck.py`) foi testada
-com arquivos `/etc/os-release` sintéticos de cada uma, mas a instalação
-completa (`install.sh`) só foi rodada de fato numa máquina Fedora/Bazzite —
-não tenho como testar as outras sem uma VM de cada. `install.sh` em si só
-usa bash + paths XDG genéricos (`~/.local/{bin,share}`), então deve
-funcionar igual em qualquer distro com bash/python3/GTK4/libadwaita; a
-única parte que varia por distro é a *sugestão* de comando pra instalar o
-VTE, que fica só de aviso — a instalação principal roda igual sem ele
-(cai pra terminal externo).
+"Instalação real" = `install.sh` rodado de ponta a ponta (instalar,
+conferir os arquivos no lugar certo, desinstalar) num container limpo
+daquela distro, como usuário sem privilégios — Fedora/Bazzite numa
+máquina de verdade, Ubuntu e Debian em containers (`podman`). "Simulado"
+= só a lógica de detecção de distro (`depcheck.py`) foi testada, com
+`/etc/os-release` sintético — não tenho VM/container fácil pra essas
+agora. `install.sh` em si não tem nada específico de distro (bash +
+paths XDG genéricos), então o padrão esperado é que funcione igual nas
+que só foram simuladas também; a única parte que varia é a *sugestão* de
+comando pra instalar o VTE, que é só um aviso — sem ele o app cai pra
+terminal externo, a instalação principal não trava.
 
 **Windows não é suportado** e não vai funcionar: `install.sh` é um script
 bash (Windows não roda `.sh` nativamente), e mesmo contornando isso com
