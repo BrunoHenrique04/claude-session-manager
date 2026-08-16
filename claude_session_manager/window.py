@@ -549,14 +549,16 @@ class MainWindow(Adw.ApplicationWindow):
         assigned_ids: set[str] = set()
 
         if favorites:
-            self._append_group("★  Favoritos", favorites)
+            self._append_group("★  Favoritos", favorites, group_key="fav")
 
         for pid, name in projects:
             members = [
                 s for s in self.sessions if self.state.project_of(s.session_id) == pid
             ]
             assigned_ids.update(s.session_id for s in members)
-            self._append_group(f"🏷  {name}", members, empty_hint=not members)
+            self._append_group(
+                f"🏷  {name}", members, group_key=f"project:{pid}", empty_hint=not members
+            )
 
         remaining = [s for s in self.sessions if s.session_id not in assigned_ids]
         by_folder: dict[str, list[Session]] = {}
@@ -570,25 +572,44 @@ class MainWindow(Adw.ApplicationWindow):
             self.groups_box.append(label)
 
         for folder in sorted(by_folder, key=lambda p: by_folder[p][0].mtime, reverse=True):
-            self._append_group(f"📁  {folder}", by_folder[folder])
+            self._append_group(f"📁  {folder}", by_folder[folder], group_key=f"folder:{folder}")
 
         self._apply_filter()
 
     def _append_group(
-        self, label: str, sessions: list[Session], empty_hint: bool = False
+        self,
+        label: str,
+        sessions: list[Session],
+        group_key: str,
+        empty_hint: bool = False,
     ) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        collapsed = self.state.is_group_collapsed(group_key)
 
+        # The whole header is a flat button: click anywhere on it (not just a
+        # tiny chevron) to fold the group away — this is what keeps the
+        # sidebar from turning into a wall of cards once there are a lot of
+        # sessions/projects.
+        header_btn = Gtk.Button()
+        header_btn.add_css_class("flat")
+        header_btn.add_css_class("csm-group-header-btn")
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("csm-group-header")
+        chevron = Gtk.Image.new_from_icon_name(
+            "pan-end-symbolic" if collapsed else "pan-down-symbolic"
+        )
+        chevron.add_css_class("dim-label")
+        header.append(chevron)
         title_label = Gtk.Label(label=label, xalign=0)
         title_label.add_css_class("csm-group-title")
+        title_label.set_hexpand(True)
         header.append(title_label)
         if sessions:
             count = Gtk.Label(label=str(len(sessions)))
             count.add_css_class("csm-group-count")
             header.append(count)
-        box.append(header)
+        header_btn.set_child(header)
+        box.append(header_btn)
 
         if empty_hint:
             hint = Gtk.Label(
@@ -597,24 +618,35 @@ class MainWindow(Adw.ApplicationWindow):
             )
             hint.add_css_class("dim-label")
             hint.add_css_class("caption")
+            hint.set_visible(not collapsed)
             box.append(hint)
             box.listbox = None
-            self.groups_box.append(box)
-            return
+            content_widget = hint
+        else:
+            listbox = Gtk.ListBox()
+            listbox.add_css_class("csm-list")
+            listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+            listbox.connect("row-activated", lambda _lb, row: self.resume(row.session))
+            listbox.set_visible(not collapsed)
+            box.append(listbox)
 
-        listbox = Gtk.ListBox()
-        listbox.add_css_class("csm-list")
-        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        listbox.connect(
-            "row-activated", lambda _lb, row: self.resume(row.session)
-        )
-        box.append(listbox)
+            for session in sessions:
+                row = SessionRow(session, self)
+                listbox.append(row)
 
-        for session in sessions:
-            row = SessionRow(session, self)
-            listbox.append(row)
+            box.listbox = listbox
+            content_widget = listbox
 
-        box.listbox = listbox
+        box.group_key = group_key
+
+        def _toggle(*_a) -> None:
+            now_collapsed = not self.state.is_group_collapsed(group_key)
+            self.state.set_group_collapsed(group_key, now_collapsed)
+            chevron.set_from_icon_name("pan-end-symbolic" if now_collapsed else "pan-down-symbolic")
+            if not self.search_entry.get_text().strip():
+                content_widget.set_visible(not now_collapsed)
+
+        header_btn.connect("clicked", _toggle)
         self.groups_box.append(box)
 
     def _apply_filter(self) -> None:
@@ -625,6 +657,8 @@ class MainWindow(Adw.ApplicationWindow):
                 group_box = group_box.get_next_sibling()
                 continue
             listbox = getattr(group_box, "listbox", None)
+            group_key = getattr(group_box, "group_key", None)
+            collapsed = bool(group_key) and self.state.is_group_collapsed(group_key)
             any_visible = not query  # groups with no listbox (e.g. section labels) stay
             if listbox is not None:
                 any_visible = False
@@ -634,6 +668,10 @@ class MainWindow(Adw.ApplicationWindow):
                     row.set_visible(visible)
                     any_visible = any_visible or visible
                     row = row.get_next_sibling()
+                # While searching, force the group open so matches are
+                # visible even if the user had it collapsed; otherwise
+                # respect the saved collapsed state.
+                listbox.set_visible(any_visible if query else not collapsed)
             group_box.set_visible(any_visible)
             group_box = group_box.get_next_sibling()
 

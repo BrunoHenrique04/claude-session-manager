@@ -34,6 +34,19 @@ CSS = """
     padding: 2px 4px 2px 4px;
 }
 
+.csm-group-header-btn {
+    background: none;
+    box-shadow: none;
+    border: none;
+    padding: 2px 4px;
+    border-radius: 8px;
+    min-height: 0;
+}
+
+.csm-group-header-btn:hover {
+    background-color: alpha(currentColor, 0.06);
+}
+
 .csm-list, .csm-list row {
     background: none;
     box-shadow: none;

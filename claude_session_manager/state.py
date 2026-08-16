@@ -38,6 +38,7 @@ class State:
             raw = {"sessions": raw, "projects": {}}
         raw.setdefault("sessions", {})
         raw.setdefault("projects", {})
+        raw.setdefault("collapsed_groups", [])
         self._data = raw
 
     def save(self) -> None:
@@ -124,3 +125,20 @@ class State:
         """Drop favorite/name/project bookkeeping for a deleted session."""
         if self._data["sessions"].pop(session_id, None) is not None:
             self.save()
+
+    # -- collapsed sidebar groups ---------------------------------------------
+    # Remembered across restarts so the sidebar stays as tidy as the user
+    # left it (e.g. "Favoritos", a project, or a per-folder group).
+
+    def is_group_collapsed(self, group_key: str) -> bool:
+        return group_key in self._data["collapsed_groups"]
+
+    def set_group_collapsed(self, group_key: str, collapsed: bool) -> None:
+        groups: list[str] = self._data["collapsed_groups"]
+        if collapsed and group_key not in groups:
+            groups.append(group_key)
+        elif not collapsed and group_key in groups:
+            groups.remove(group_key)
+        else:
+            return
+        self.save()
