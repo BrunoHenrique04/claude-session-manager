@@ -38,11 +38,26 @@ def vte_install_hint() -> str:
         return "sudo dnf install vte291-gtk4"
     if ids & {"debian", "ubuntu"}:
         return "sudo apt install gir1.2-vte-3.91-common libvte-2.91-gtk4-0 (nome pode variar por versão)"
-    if ids & {"arch", "manjaro"}:
+    if ids & {"arch", "manjaro", "endeavouros"}:
         return "sudo pacman -S vte4"
+    if shutil.which("transactional-update") and (
+        "opensuse-microos" in ids or "opensuse-aeon" in ids or "opensuse-kalpa" in ids
+    ):
+        return (
+            "sudo transactional-update pkg install libvte-2.91-gtk4-0 "
+            "typelib-1_0-Vte-3_91   (sistema imutável; pede reboot)"
+        )
+    if ids & {"opensuse", "opensuse-leap", "opensuse-tumbleweed", "suse", "sles"}:
+        return "sudo zypper install libvte-2.91-gtk4-0 typelib-1_0-Vte-3_91"
+    if ids & {"alpine"}:
+        return "sudo apk add vte3-gtk4   (nome pode variar por versão do Alpine)"
+    if ids & {"void"}:
+        return "sudo xbps-install -S vte3-gtk4"
+    if ids & {"nixos"}:
+        return "adicione `vte-gtk4` ao seu configuration.nix (ou `nix-shell -p vte-gtk4`)"
     return (
         "instale o pacote VTE com bindings GTK4 do seu gerenciador de pacotes "
-        "(ex.: vte291-gtk4 / gir1.2-vte-3.91 / vte4)"
+        "(ex.: vte291-gtk4 / gir1.2-vte-3.91 / vte4 / libvte-2.91-gtk4-0)"
     )
 
 

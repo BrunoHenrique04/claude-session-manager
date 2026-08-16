@@ -5,6 +5,39 @@ salvas em `~/.claude/projects/`, de qualquer diretório do sistema.
 
 Inspirado em [r4nd3l/agent-session-manager](https://github.com/r4nd3l/agent-session-manager).
 
+## Plataforma
+
+**Linux desktop, só isso.** É GTK4/libadwaita de verdade — entrada `.desktop`,
+tema de ícones XDG, terminal embutido via VTE — nada disso existe fora do
+Linux. `install.sh` é testado/simulado nas famílias principais:
+
+| Distro                                   | Gerenciador de pacotes p/ VTE | Testado |
+|-------------------------------------------|-------------------------------|---------|
+| Fedora / RHEL / CentOS                    | `dnf`                         | ✅ instalação real (Bazzite, base Fedora) |
+| Bazzite / Silverblue / Kinoite (atômicos) | `rpm-ostree` (+ reboot)       | ✅ instalação real |
+| Debian / Ubuntu                           | `apt`                         | ⚙️ simulado (detecção de distro só) |
+| Arch / Manjaro / EndeavourOS              | `pacman`                      | ⚙️ simulado |
+| openSUSE (Leap/Tumbleweed)                | `zypper`                      | ⚙️ simulado |
+| openSUSE MicroOS/Aeon/Kalpa (atômicos)    | `transactional-update` (+ reboot) | ⚙️ simulado |
+| Alpine, Void, NixOS                       | `apk` / `xbps` / `nix`        | ⚙️ simulado |
+
+"Simulado" = a lógica de detecção de distro (`depcheck.py`) foi testada
+com arquivos `/etc/os-release` sintéticos de cada uma, mas a instalação
+completa (`install.sh`) só foi rodada de fato numa máquina Fedora/Bazzite —
+não tenho como testar as outras sem uma VM de cada. `install.sh` em si só
+usa bash + paths XDG genéricos (`~/.local/{bin,share}`), então deve
+funcionar igual em qualquer distro com bash/python3/GTK4/libadwaita; a
+única parte que varia por distro é a *sugestão* de comando pra instalar o
+VTE, que fica só de aviso — a instalação principal roda igual sem ele
+(cai pra terminal externo).
+
+**Windows não é suportado** e não vai funcionar: `install.sh` é um script
+bash (Windows não roda `.sh` nativamente), e mesmo contornando isso com
+WSL, faltam GTK4 + libadwaita com build funcional pra Windows, VTE, e o
+conceito inteiro de `.desktop`/tema de ícones XDG que o instalador usa.
+Não é uma limitação de portar o código — é a plataforma de UI (GTK4/
+libadwaita) e o mecanismo de menu (XDG) sendo Linux-only por natureza.
+
 ## Instalar (rápido)
 
 ```bash
