@@ -432,6 +432,18 @@ class MainWindow(Adw.ApplicationWindow):
         scrolled.set_vexpand(True)
         self.toast_overlay.set_child(scrolled)
 
+        # Same problem as the popover-vs-refresh fix, but for plain
+        # Gtk tooltips (e.g. the cross-session share button's): they aren't
+        # a Gtk.Popover, so track_popover() doesn't see them, and the timer
+        # rebuilding the sidebar out from under a hovered widget was killing
+        # the tooltip almost as soon as it appeared. Pausing the auto-refresh
+        # for as long as the pointer is anywhere over the list covers both.
+        self._pointer_in_sidebar = False
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", lambda *_a: setattr(self, "_pointer_in_sidebar", True))
+        motion.connect("leave", lambda *_a: setattr(self, "_pointer_in_sidebar", False))
+        scrolled.add_controller(motion)
+
         clamp = Adw.Clamp()
         clamp.set_maximum_size(920)
         scrolled.set_child(clamp)
@@ -494,7 +506,7 @@ class MainWindow(Adw.ApplicationWindow):
         return True
 
     def _on_timeout(self) -> bool:
-        if self._popups_open <= 0:
+        if self._popups_open <= 0 and not self._pointer_in_sidebar:
             self.refresh()
         return True
 
