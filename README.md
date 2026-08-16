@@ -59,6 +59,17 @@ da lista, em vez de um terminal externo.
   "Docs") e atribua sessões de pastas/repositórios diferentes a ele pelo
   ícone 🏷 em cada linha — útil quando o mesmo produto tem sessões em
   vários diretórios. Sessões sem projeto continuam agrupadas por pasta.
+- **Contexto entre sessões, mas só dentro de um projeto** (ícone 🔗 no
+  cabeçalho do grupo): o Claude Code tem seu próprio esquema global de
+  memória entre sessões, que nem sempre é desejável. Isso é uma versão
+  no escopo do projeto — quando ligado, cada sessão retomada recebe um
+  resumo curto das outras sessões do mesmo projeto (título, pasta, do
+  que tratam) via `--append-system-prompt`, e as pastas delas ficam
+  acessíveis via `--add-dir`. Desligado por padrão; nunca atravessa
+  projetos diferentes.
+- Grupos (Favoritos, projetos, pastas) são recolhíveis — clique no
+  cabeçalho para esconder a lista; fica salvo entre reinicializações.
+  Uma busca ativa sempre reabre um grupo recolhido que tiver resultado.
 - Favoritos (grupo próprio no topo) e nomes customizados, persistidos em
   `~/.config/claude-session-manager/state.json` — nunca nos arquivos do
   Claude.
