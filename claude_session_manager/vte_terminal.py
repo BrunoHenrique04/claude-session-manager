@@ -29,6 +29,8 @@ def build_terminal_widget(
     session_id: str,
     cwd: str | None,
     extra_args: list[str] | None = None,
+    system_prompt: str | None = None,
+    add_dirs: list[str] | None = None,
 ) -> Gtk.Widget:
     """A ready-to-embed widget running `claude --resume` in cwd.
 
@@ -50,7 +52,7 @@ def build_terminal_widget(
     scrolled.set_hexpand(True)
     scrolled.set_vexpand(True)
 
-    cmd = terminal.resume_command(session_id, cwd, extra_args)
+    cmd = terminal.resume_command(session_id, cwd, extra_args, system_prompt, add_dirs)
     argv = ["/bin/bash", "-lc", cmd]
     spawn_cwd = cwd if cwd and GLib.file_test(cwd, GLib.FileTest.IS_DIR) else GLib.get_home_dir()
 

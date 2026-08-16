@@ -45,27 +45,44 @@ RESUME_MODES: list[tuple[str, str, list[str]]] = [
 
 
 def resume_command(
-    session_id: str, cwd: str | None, extra_args: list[str] | None = None
+    session_id: str,
+    cwd: str | None,
+    extra_args: list[str] | None = None,
+    system_prompt: str | None = None,
+    add_dirs: list[str] | None = None,
 ) -> str:
-    """Shell command that cds into the project dir (if known) and resumes."""
+    """Shell command that cds into the project dir (if known) and resumes.
+
+    `system_prompt`/`add_dirs` are how opt-in cross-session context (see
+    cross_session.py) gets threaded through: appended as
+    `--append-system-prompt` and `--add-dir` respectively.
+    """
     parts = []
     if cwd:
         parts.append(f"cd {shlex.quote(cwd)}")
     claude_cmd = ["claude", "--resume", session_id, *(extra_args or [])]
+    if system_prompt:
+        claude_cmd += ["--append-system-prompt", system_prompt]
+    for d in add_dirs or []:
+        claude_cmd += ["--add-dir", d]
     parts.append(" ".join(shlex.quote(p) for p in claude_cmd))
     # Keep the shell open after Claude exits so errors are visible.
     return " && ".join(parts) + "; exec bash"
 
 
 def launch_resume(
-    session_id: str, cwd: str | None, extra_args: list[str] | None = None
+    session_id: str,
+    cwd: str | None,
+    extra_args: list[str] | None = None,
+    system_prompt: str | None = None,
+    add_dirs: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Spawn a terminal running the resume command.
 
     Returns (ok, message) — message is an error to surface on failure, or
     the command itself on success (useful for a status line / toast).
     """
-    cmd = resume_command(session_id, cwd, extra_args)
+    cmd = resume_command(session_id, cwd, extra_args, system_prompt, add_dirs)
     for binary, build_argv in _TERMINALS:
         path = shutil.which(binary)
         if not path:

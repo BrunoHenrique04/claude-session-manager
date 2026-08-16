@@ -111,6 +111,20 @@ class State:
                 entry.pop("project", None)
         self.save()
 
+    def project_cross_session(self, project_id: str) -> bool:
+        """Whether sessions in this project should be told about their
+        siblings when resumed — an opt-in, project-scoped version of
+        Claude's global cross-session memory, which the user wants off by
+        default but useful within one deliberately-grouped project."""
+        p = self._data["projects"].get(project_id)
+        return bool(p.get("cross_session", False)) if p else False
+
+    def set_project_cross_session(self, project_id: str, value: bool) -> None:
+        if project_id not in self._data["projects"]:
+            return
+        self._data["projects"][project_id]["cross_session"] = value
+        self.save()
+
     def project_of(self, session_id: str) -> str | None:
         return self._data["sessions"].get(session_id, {}).get("project")
 

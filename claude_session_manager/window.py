@@ -11,7 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from . import terminal
+from . import cross_session, terminal
 from .depcheck import vte_install_hint
 from .sessions import Session, discover_sessions
 from .state import State
@@ -304,6 +304,7 @@ class SessionRow(Gtk.ListBoxRow):
         self.fav_button.set_icon_name("starred-symbolic")
         self.fav_button.set_valign(Gtk.Align.CENTER)
         self.fav_button.add_css_class("flat")
+        self.fav_button.add_css_class("csm-fav-btn")
         self.fav_button.set_active(state.is_favorite(session.session_id))
         self.fav_button.set_tooltip_text("Favorito")
         self.fav_button.connect("toggled", self._toggled_fav)
@@ -593,6 +594,7 @@ class MainWindow(Adw.ApplicationWindow):
         header_btn = Gtk.Button()
         header_btn.add_css_class("flat")
         header_btn.add_css_class("csm-group-header-btn")
+        header_btn.set_hexpand(True)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("csm-group-header")
         chevron = Gtk.Image.new_from_icon_name(
@@ -609,7 +611,31 @@ class MainWindow(Adw.ApplicationWindow):
             count.add_css_class("csm-group-count")
             header.append(count)
         header_btn.set_child(header)
-        box.append(header_btn)
+
+        header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        header_row.append(header_btn)
+
+        if group_key.startswith("project:"):
+            pid = group_key.split(":", 1)[1]
+            cross_btn = Gtk.ToggleButton()
+            cross_btn.set_icon_name("emblem-shared-symbolic")
+            cross_btn.set_valign(Gtk.Align.CENTER)
+            cross_btn.add_css_class("flat")
+            cross_btn.add_css_class("csm-cross-btn")
+            cross_btn.set_active(self.state.project_cross_session(pid))
+            cross_btn.set_tooltip_text(
+                "Contexto entre sessões deste projeto\n"
+                "Ligado: ao retomar uma sessão daqui, ela recebe um resumo "
+                "das outras sessões do projeto (título, pasta, do que tratam) "
+                "— só entre sessões deste projeto, nunca globalmente."
+            )
+            cross_btn.connect(
+                "toggled",
+                lambda btn, pid=pid: self.state.set_project_cross_session(pid, btn.get_active()),
+            )
+            header_row.append(cross_btn)
+
+        box.append(header_row)
 
         if empty_hint:
             hint = Gtk.Label(
@@ -686,6 +712,11 @@ class MainWindow(Adw.ApplicationWindow):
         extra_args = extra_args or []
         tab_key = f"{session.session_id}:{','.join(extra_args)}"
 
+        project_id = self.state.project_of(session.session_id)
+        system_prompt, add_dirs = cross_session.build_digest(
+            self.state, self.sessions, session.session_id, project_id
+        )
+
         if target != "external" and VTE_AVAILABLE and self.tab_view is not None:
             existing = self._open_pages.get(tab_key)
             if existing is not None and existing.get_parent() is not None:
@@ -694,7 +725,9 @@ class MainWindow(Adw.ApplicationWindow):
             title = self.state.custom_name(session.session_id) or session.project_name
             if extra_args:
                 title += " ⚠"
-            widget = build_terminal_widget(session.session_id, session.cwd, extra_args)
+            widget = build_terminal_widget(
+                session.session_id, session.cwd, extra_args, system_prompt, add_dirs
+            )
             page = self.tab_view.append(widget)
             page.set_title(title)
             page.set_tooltip(f"{title} · {session.session_id[:8]}")
@@ -702,7 +735,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._open_pages[tab_key] = page
             return
 
-        ok, message = terminal.launch_resume(session.session_id, session.cwd, extra_args)
+        ok, message = terminal.launch_resume(
+            session.session_id, session.cwd, extra_args, system_prompt, add_dirs
+        )
         toast = Adw.Toast(title=message if ok else f"⚠ {message}")
         toast.set_timeout(4)
         self.toast_overlay.add_toast(toast)

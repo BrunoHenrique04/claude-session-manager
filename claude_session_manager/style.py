@@ -47,6 +47,18 @@ CSS = """
     background-color: alpha(currentColor, 0.06);
 }
 
+.csm-fav-btn:checked {
+    color: #f5c518;
+}
+
+.csm-fav-btn:checked:hover {
+    color: #ffd84d;
+}
+
+.csm-cross-btn:checked {
+    color: #f5c518;
+}
+
 .csm-list, .csm-list row {
     background: none;
     box-shadow: none;
